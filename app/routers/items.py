@@ -1,7 +1,9 @@
+import logging
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
-# Заглушка базы данных
+logger = logging.getLogger(__name__)
+
 fake_db = {
     1: {"name": "Foo", "price": 50.2, "is_offer": False},
     2: {"name": "Bar", "price": 30.0, "is_offer": True}
@@ -50,11 +52,15 @@ class ItemUpdate(BaseModel):
 router = APIRouter(prefix="/items", tags=["items"])
 
 def is_name_unique(name: str, exclude_id: int | None = None) -> bool:
+    """Проверяет, уникально ли имя товара."""
+    logger.debug(f"Checking uniqueness for name '{name}', exclude_id={exclude_id}")
     for item_id, item_data in fake_db.items():
         if exclude_id and item_id == exclude_id:
             continue
         if item_data["name"].lower() == name.lower():
+            logger.info(f"Name '{name}' already exists (item_id={item_id})")
             return False
+    logger.debug(f"Name '{name}' is unique")
     return True
 
 @router.get("/{item_id}")
@@ -74,12 +80,16 @@ def read_item(
         example="test"
     )
 ):
+    logger.info(f"GET /items/{item_id} called with q='{q}'")
+    
     if item_id not in fake_db:
+        logger.warning(f"Item {item_id} not found")
         raise HTTPException(
             status_code=404, 
             detail=f"Товар с ID {item_id} не найден"
         )
     
+    logger.info(f"Item {item_id} retrieved successfully")
     return {
         "item_id": item_id, 
         "item": fake_db[item_id], 
@@ -88,16 +98,19 @@ def read_item(
 
 @router.post("/", response_model=Item, status_code=201)
 def create_item(item: Item):
+    """Создать новый товар."""
+    logger.info(f"POST /items/ called with data: {item.model_dump()}")
     
     if not is_name_unique(item.name):
+        logger.warning(f"Failed to create item: name '{item.name}' already exists")
         raise HTTPException(
             status_code=400,
             detail=f"Товар с названием '{item.name}' уже существует"
         )
     
     new_id = max(fake_db.keys()) + 1
-    
     fake_db[new_id] = item.model_dump()
+    logger.info(f"Item created successfully with ID {new_id}")
     
     return item
 
@@ -112,7 +125,10 @@ def update_item(
     ),
     item_update: ItemUpdate = None
 ):
+    logger.info(f"PUT /items/{item_id} called with data: {item_update.model_dump(exclude_unset=True)}")
+    
     if item_id not in fake_db:
+        logger.warning(f"Update failed: item {item_id} not found")
         raise HTTPException(
             status_code=404,
             detail=f"Товар с ID {item_id} не найден"
@@ -122,6 +138,7 @@ def update_item(
     
     if item_update.name is not None:
         if not is_name_unique(item_update.name, exclude_id=item_id):
+            logger.warning(f"Update failed: name '{item_update.name}' already exists")
             raise HTTPException(
                 status_code=400,
                 detail=f"Товар с названием '{item_update.name}' уже существует"
@@ -135,6 +152,7 @@ def update_item(
         current_item["is_offer"] = item_update.is_offer
     
     fake_db[item_id] = current_item
+    logger.info(f"Item {item_id} updated successfully")
     
     return {
         "item_id": item_id,
@@ -152,14 +170,17 @@ def delete_item(
         example=1
     )
 ):
+    logger.info(f"DELETE /items/{item_id} called")
     
     if item_id not in fake_db:
+        logger.warning(f"Delete failed: item {item_id} not found")
         raise HTTPException(
             status_code=404,
             detail=f"Товар с ID {item_id} не найден"
         )
     
     deleted_item = fake_db.pop(item_id)
+    logger.info(f"Item '{deleted_item['name']}' (ID {item_id}) deleted successfully")
     
     return {
         "message": f"Товар '{deleted_item['name']}' успешно удален",
